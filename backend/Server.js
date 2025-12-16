@@ -411,6 +411,71 @@ io.on('connection', (socket) => {
     });
   });
 
+  // Admin function to end meeting immediately (including scheduled end)
+  socket.on('admin-end-meeting', ({ roomId, adminName, reason }) => {
+    const room = rooms[roomId];
+    if (!room) {
+      console.log(`❌ Room ${roomId} not found for meeting end`);
+      return;
+    }
+
+    // Verify that the requesting user is the admin (or allow system automatic end)
+    const admin = room.users.find(u => u.id === socket.id);
+    if (!admin || !admin.isAdmin) {
+      console.log(`❌ Unauthorized meeting end attempt by ${socket.id}`);
+      socket.emit('admin-action-error', { message: 'Only admins can end meetings' });
+      return;
+    }
+
+    console.log(`👑 Admin ${adminName} ending meeting ${roomId} - ${reason}`);
+
+    // Generate final meeting statistics
+    const stats = {
+      totalParticipants: room.users.length,
+      speechParticipants: room.stats.speechUsers.size,
+      chatParticipants: room.stats.chatUsers.size,
+      speechUsers: Array.from(room.stats.speechUsers).map((id) => {
+        const u = room.users.find((x) => x.id === id);
+        return u ? u.name : id;
+      }),
+      chatUsers: Array.from(room.stats.chatUsers).map((id) => {
+        const u = room.users.find((x) => x.id === id);
+        return u ? u.name : id;
+      }),
+      endReason: reason,
+      endTime: new Date().toISOString()
+    };
+
+    // Send final system message about meeting end
+    const endMessage = {
+      id: `meeting-end-${Date.now()}`,
+      user: 'System',
+      text: `🔚 Meeting ended by admin ${adminName}. Reason: ${reason}`,
+      timestamp: new Date().toLocaleTimeString(),
+      type: 'system',
+    };
+    io.to(roomId).emit('new-message', endMessage);
+
+    // Notify all participants that meeting has ended
+    room.users.forEach((u) => {
+      io.to(u.id).emit('meeting-ended-by-admin', {
+        stats,
+        adminName,
+        reason,
+        roomId,
+        message: reason.includes('Scheduled end time') ? 
+          `The meeting has reached its scheduled end time and has been automatically terminated.` :
+          `The meeting has been ended by admin ${adminName}. Reason: ${reason}`
+      });
+    });
+
+    // Clean up room and socket data
+    delete rooms[roomId];
+    room.users.forEach((u) => delete socketData[u.id]);
+
+    console.log(`✅ Meeting ${roomId} successfully ended by admin ${adminName} - ${reason}`);
+  });
+
   socket.on('leave-room', (roomId) => {
     socket.leave(roomId);
     const room = rooms[roomId];
