@@ -178,6 +178,39 @@ io.on('connection', (socket) => {
     io.emit('events-updated', events);
   });
 
+  socket.on('delete-event', ({ eventId, adminName, adminEmail }) => {
+    console.log(`🗑️ Delete event request: ${eventId} by ${adminName} (${adminEmail})`);
+    
+    // Find the event to delete
+    const eventIndex = events.findIndex(event => 
+      event.roomId === eventId && 
+      event.adminName === adminName && 
+      event.adminEmail === adminEmail
+    );
+    
+    if (eventIndex === -1) {
+      console.log(`❌ Event not found or unauthorized delete attempt: ${eventId}`);
+      socket.emit('delete-event-error', { 
+        message: 'Event not found or you are not authorized to delete this event.' 
+      });
+      return;
+    }
+    
+    // Remove the event from the array
+    const deletedEvent = events.splice(eventIndex, 1)[0];
+    console.log(`✅ Event deleted successfully: ${deletedEvent.title} (${eventId})`);
+    
+    // Broadcast updated events list to all clients
+    io.emit('events-updated', events);
+    
+    // Send confirmation to the admin who deleted the event
+    socket.emit('delete-event-success', { 
+      eventId, 
+      eventTitle: deletedEvent.title,
+      message: `Event "${deletedEvent.title}" has been deleted successfully.` 
+    });
+  });
+
   socket.on('get-events', () => socket.emit('events-updated', events));
 
   socket.on('request-email-passcode', async (roomId, userEmail, roomPasscode) => {
@@ -341,6 +374,33 @@ io.on('connection', (socket) => {
     io.to(to).emit('signal', { from, signal });
   });
 
+  // Media ready handler - ensures all participants know when someone's media is ready
+  socket.on('media-ready', (roomId) => {
+    const room = rooms[roomId];
+    if (!room) return;
+    
+    const user = room.users.find((u) => u.id === socket.id);
+    if (!user) return;
+    
+    console.log(`📹 ${user.name} media stream is ready`);
+    
+    // Notify all other participants that this user's media is ready
+    socket.to(roomId).emit('participant-media-ready', {
+      userId: socket.id,
+      userName: user.name
+    });
+    
+    // Send system message about media readiness
+    const mediaMessage = {
+      id: `media-ready-${Date.now()}`,
+      user: 'System',
+      text: `📹 ${user.name} is ready for video calls`,
+      timestamp: new Date().toLocaleTimeString(),
+      type: 'system',
+    };
+    io.to(roomId).emit('new-message', mediaMessage);
+  });
+
   // Whiteboard handlers
   socket.on('whiteboard-draw', (roomId, drawData) => {
     const room = rooms[roomId];
@@ -409,6 +469,29 @@ io.on('connection', (socket) => {
       userName: user.name,
       isRaised: isRaised,
     });
+  });
+
+  // Camera status change handler
+  socket.on('camera-status-changed', ({ roomId, userId, userName, cameraOn }) => {
+    const room = rooms[roomId];
+    if (!room) return;
+
+    console.log(`📹 ${userName} (${userId}) camera status changed: ${cameraOn ? 'ON' : 'OFF'}`);
+
+    // Update participant camera status in room data
+    const participant = room.users.find(u => u.id === userId);
+    if (participant) {
+      participant.cameraOn = cameraOn;
+    }
+
+    // Broadcast camera status change to all other participants
+    socket.to(roomId).emit('camera-status-changed', {
+      userId,
+      userName,
+      cameraOn
+    });
+
+    console.log(`✅ Camera status broadcasted for ${userName}`);
   });
 
   // Admin function to end meeting immediately (including scheduled end)
