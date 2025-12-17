@@ -525,6 +525,69 @@ io.on('connection', (socket) => {
     console.log(`✅ Camera status broadcasted for ${userName}`);
   });
 
+  // Admin function to remove participant from meeting
+  socket.on('admin-remove-participant', ({ roomId, participantId, participantName, adminName }) => {
+    const room = rooms[roomId];
+    if (!room) {
+      console.log(`❌ Room ${roomId} not found for participant removal`);
+      return;
+    }
+
+    // Verify that the requesting user is the admin
+    const admin = room.users.find(u => u.id === socket.id);
+    if (!admin || !admin.isAdmin) {
+      console.log(`❌ Unauthorized participant removal attempt by ${socket.id}`);
+      socket.emit('admin-action-error', { message: 'Only admins can remove participants' });
+      return;
+    }
+
+    // Find the participant to remove
+    const participantToRemove = room.users.find(u => u.id === participantId);
+    if (!participantToRemove) {
+      console.log(`❌ Participant ${participantId} not found in room ${roomId}`);
+      socket.emit('admin-action-error', { message: 'Participant not found in meeting' });
+      return;
+    }
+
+    console.log(`👑 Admin ${adminName} removing participant: ${participantName} (${participantId}) from room ${roomId}`);
+
+    // Send removal notification to the specific participant
+    io.to(participantId).emit('removed-by-admin', {
+      adminName,
+      participantName,
+      roomId,
+      reason: 'Removed by meeting admin',
+      message: `You have been removed from the meeting by admin ${adminName}.`
+    });
+
+    // Remove participant from room data
+    room.users = room.users.filter(u => u.id !== participantId);
+    if (participantToRemove.email) {
+      room.joinedEmails.delete(participantToRemove.email.toLowerCase());
+    }
+
+    // Clean up socket data
+    delete socketData[participantId];
+
+    // Send system message to remaining participants
+    const removalMessage = {
+      id: `removal-${Date.now()}`,
+      user: 'System',
+      text: `👑 ${participantName} was removed from the meeting by admin ${adminName}`,
+      timestamp: new Date().toLocaleTimeString(),
+      type: 'system',
+    };
+    io.to(roomId).emit('new-message', removalMessage);
+
+    // Update participant list for remaining users
+    io.to(roomId).emit('participant-list', room.users);
+
+    // Notify other participants about the removal
+    socket.to(roomId).emit('user-left', participantId);
+
+    console.log(`✅ Participant ${participantName} successfully removed from room ${roomId} by admin ${adminName}`);
+  });
+
   // Admin function to end meeting immediately (including scheduled end)
   socket.on('admin-end-meeting', ({ roomId, adminName, reason }) => {
     const room = rooms[roomId];
