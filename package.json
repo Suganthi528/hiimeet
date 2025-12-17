@@ -1,4 +1,12 @@
 {
+  "name": "himeet",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "start": "node server.js",
+    "start:backend": "node backend/server.js",
+    "heroku-postbuild": "echo skip"
+  },
   "dependencies": {
     "uuid": "^13.0.0"
   }
