@@ -406,23 +406,54 @@ io.on('connection', (socket) => {
     const room = rooms[roomId];
     if (!room) return;
     
-    // Store drawing data
+    console.log(`🎨 Whiteboard draw from ${drawData.userName} in room ${roomId}`);
+    
+    // Store drawing data with timestamp
     if (!room.whiteboardData) room.whiteboardData = [];
-    room.whiteboardData.push(drawData);
+    room.whiteboardData.push({
+      ...drawData,
+      timestamp: Date.now(),
+      socketId: socket.id
+    });
+    
+    // Keep only last 1000 drawing actions to prevent memory issues
+    if (room.whiteboardData.length > 1000) {
+      room.whiteboardData = room.whiteboardData.slice(-1000);
+    }
     
     // Broadcast to all other participants
     socket.to(roomId).emit('whiteboard-draw', drawData);
+    
+    console.log(`✅ Whiteboard draw broadcasted to room ${roomId}`);
   });
 
-  socket.on('whiteboard-clear', (roomId) => {
+  socket.on('whiteboard-clear', (roomId, clearData) => {
     const room = rooms[roomId];
     if (!room) return;
+    
+    console.log(`🗑️ Whiteboard cleared by ${clearData?.userName} in room ${roomId}`);
     
     // Clear stored data
     room.whiteboardData = [];
     
-    // Broadcast clear to all participants
-    io.to(roomId).emit('whiteboard-clear');
+    // Broadcast clear to all participants (including sender for confirmation)
+    io.to(roomId).emit('whiteboard-clear', clearData);
+    
+    console.log(`✅ Whiteboard clear broadcasted to room ${roomId}`);
+  });
+
+  // Send existing whiteboard data to new participants
+  socket.on('get-whiteboard', (roomId) => {
+    const room = rooms[roomId];
+    if (!room || !room.whiteboardData || room.whiteboardData.length === 0) {
+      console.log(`📋 No whiteboard data to send for room ${roomId}`);
+      return;
+    }
+    
+    console.log(`📋 Sending ${room.whiteboardData.length} whiteboard actions to new participant`);
+    
+    // Send existing whiteboard data to the requesting participant
+    socket.emit('whiteboard-data', room.whiteboardData);
   });
 
   socket.on('get-whiteboard', (roomId) => {
