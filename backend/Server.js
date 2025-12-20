@@ -20,113 +20,113 @@ app.get('/health', (req, res) => {
   res.json({ status: 'healthy', timestamp: new Date().toISOString() });
 });
 
-  app.get('/network-info', (req, res) => {
-    try {
-      const nets = os.networkInterfaces();
-      const interfaces = {};
-      Object.keys(nets).forEach((name) => {
-        interfaces[name] = nets[name]
-          .filter((n) => n.family === 'IPv4')
-          .map((n) => ({ address: n.address, internal: n.internal }));
-      });
+app.get('/network-info', (req, res) => {
+  try {
+    const nets = os.networkInterfaces();
+    const interfaces = {};
+    Object.keys(nets).forEach((name) => {
+      interfaces[name] = nets[name]
+        .filter((n) => n.family === 'IPv4')
+        .map((n) => ({ address: n.address, internal: n.internal }));
+    });
     res.json({
       boundHost: process.env.HOST || '0.0.0.0',
       port: process.env.PORT || 5000,
       interfaces,
       timestamp: new Date().toISOString(),
     });
-    } catch (err) {
-      res.status(500).json({ error: String(err) });
-    }
-  });
-
-  try {
-    const frontendBuildPath = path.join(__dirname, '..', 'frontend', 'build');
-    if (fs.existsSync(frontendBuildPath)) {
-      console.log('📦 Serving frontend static files from', frontendBuildPath);
-      app.use(express.static(frontendBuildPath));
-      app.get('*', (req, res) => res.sendFile(path.join(frontendBuildPath, 'index.html')));
-    }
-  } catch (e) {
-    console.warn('⚠️ Error while checking/serving frontend build:', e.message);
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
   }
+});
 
-  const server = http.createServer(app);
-  const io = new Server(server, {
+try {
+  const frontendBuildPath = path.join(__dirname, '..', 'frontend', 'build');
+  if (fs.existsSync(frontendBuildPath)) {
+    console.log('📦 Serving frontend static files from', frontendBuildPath);
+    app.use(express.static(frontendBuildPath));
+    app.get('*', (req, res) => res.sendFile(path.join(frontendBuildPath, 'index.html')));
+  }
+} catch (e) {
+  console.warn('⚠️ Error while checking/serving frontend build:', e.message);
+}
+
+const server = http.createServer(app);
+const io = new Server(server, {
   cors: { origin: '*', methods: ['GET', 'POST'], credentials: true },
-    transports: ['websocket', 'polling'],
-  });
+  transports: ['websocket', 'polling'],
+});
 
-  const DEFAULT_PORT = parseInt(process.env.PORT, 10) || 5000;
-  const HOST = process.env.HOST || '0.0.0.0';
-  const MAX_PORT_RETRIES = 12;
+const DEFAULT_PORT = parseInt(process.env.PORT, 10) || 5000;
+const HOST = process.env.HOST || '0.0.0.0';
+const MAX_PORT_RETRIES = 12;
 
-  function logListening(port) {
-    const addresses = [];
-    const nets = os.networkInterfaces();
-    Object.keys(nets).forEach((name) => {
-      for (const net of nets[name]) {
-        if (net.family === 'IPv4' && !net.internal) addresses.push(net.address);
-      }
-    });
-    console.log(`🚀 Server running on http://${HOST}:${port}`);
-    if (HOST === '0.0.0.0' && addresses.length > 0) {
-      console.log('✅ Backend reachable on your LAN at:');
-      addresses.forEach((addr) => console.log(`   http://${addr}:${port}`));
+function logListening(port) {
+  const addresses = [];
+  const nets = os.networkInterfaces();
+  Object.keys(nets).forEach((name) => {
+    for (const net of nets[name]) {
+      if (net.family === 'IPv4' && !net.internal) addresses.push(net.address);
     }
+  });
+  console.log(`🚀 Server running on http://${HOST}:${port}`);
+  if (HOST === '0.0.0.0' && addresses.length > 0) {
+    console.log('✅ Backend reachable on your LAN at:');
+    addresses.forEach((addr) => console.log(`   http://${addr}:${port}`));
   }
+}
 
-  function startServer(port = DEFAULT_PORT, retriesLeft = MAX_PORT_RETRIES) {
-    server.removeAllListeners('error');
-    server.removeAllListeners('listening');
-    server.once('listening', () => logListening(port));
-    server.once('error', (err) => {
-      if (err && err.code === 'EADDRINUSE') {
-        if (retriesLeft > 0) {
+function startServer(port = DEFAULT_PORT, retriesLeft = MAX_PORT_RETRIES) {
+  server.removeAllListeners('error');
+  server.removeAllListeners('listening');
+  server.once('listening', () => logListening(port));
+  server.once('error', (err) => {
+    if (err && err.code === 'EADDRINUSE') {
+      if (retriesLeft > 0) {
         console.warn(`⚠️ Port ${port} in use, trying ${port + 1}`);
         return setTimeout(() => startServer(port + 1, retriesLeft - 1), 300);
       }
       console.error('No available ports found after retries.');
-        process.exit(1);
-      }
-    console.error('Server error:', err);
       process.exit(1);
-    });
-      server.listen(port, HOST);
-  }
+    }
+    console.error('Server error:', err);
+    process.exit(1);
+  });
+  server.listen(port, HOST);
+}
 
-  const rooms = {};
-  const socketData = {};
-  const events = [];
-  const emailPasscodes = {};
+const rooms = {};
+const socketData = {};
+const events = [];
+const emailPasscodes = {};
 
-  function generatePasscode() {
-    return Math.floor(100000 + Math.random() * 900000).toString();
-  }
+function generatePasscode() {
+  return Math.floor(100000 + Math.random() * 900000).toString();
+}
 
-  function createEmailTransporter() {
-    if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
+function createEmailTransporter() {
+  if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
     return nodemailer.createTransport({
       service: 'gmail',
       auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS },
     });
-    }
-    if (process.env.SMTP_HOST) {
+  }
+  if (process.env.SMTP_HOST) {
     return nodemailer.createTransporter({
       host: process.env.SMTP_HOST,
       port: process.env.SMTP_PORT || 587,
       secure: process.env.SMTP_PORT == 465,
       auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
     });
-    }
-    return null;
   }
+  return null;
+}
 
-  async function sendPasscodeEmail(userEmail, passcode, roomId) {
-    try {
-      let transporter = createEmailTransporter();
-      if (!transporter) {
-        const testAccount = await nodemailer.createTestAccount();
+async function sendPasscodeEmail(userEmail, passcode, roomId) {
+  try {
+    let transporter = createEmailTransporter();
+    if (!transporter) {
+      const testAccount = await nodemailer.createTestAccount();
       transporter = nodemailer.createTransport({
         host: 'smtp.ethereal.email',
         port: 587,
@@ -134,10 +134,10 @@ app.get('/health', (req, res) => {
         auth: { user: testAccount.user, pass: testAccount.pass },
       });
     }
-      const mailOptions = {
-        from: process.env.EMAIL_USER || 'noreply@meetingapp.com',
-        to: userEmail,
-        subject: 'Your Meeting Room Passcode',
+    const mailOptions = {
+      from: process.env.EMAIL_USER || 'noreply@meetingapp.com',
+      to: userEmail,
+      subject: 'Your Meeting Room Passcode',
       html: `<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
         <h2>Meeting Room Access Passcode</h2>
         <p>Your passcode is:</p>
@@ -147,110 +147,66 @@ app.get('/health', (req, res) => {
         <p>Room ID: ${roomId}</p>
         <p>This passcode expires in 10 minutes.</p>
       </div>`,
-        text: `Your meeting room passcode is: ${passcode}\nRoom ID: ${roomId}\nThis passcode expires in 10 minutes.`,
-      };
-      const info = await transporter.sendMail(mailOptions);
-      if (process.env.NODE_ENV !== 'production' && !process.env.EMAIL_USER) {
-        const previewUrl = nodemailer.getTestMessageUrl(info);
-        if (previewUrl) console.log(`📧 Test email preview: ${previewUrl} (passcode: ${passcode})`);
+      text: `Your meeting room passcode is: ${passcode}\nRoom ID: ${roomId}\nThis passcode expires in 10 minutes.`,
+    };
+    const info = await transporter.sendMail(mailOptions);
+    if (process.env.NODE_ENV !== 'production' && !process.env.EMAIL_USER) {
+      const previewUrl = nodemailer.getTestMessageUrl(info);
+      if (previewUrl) console.log(`📧 Test email preview: ${previewUrl} (passcode: ${passcode})`);
     } else {
       console.log(`📧 Passcode email sent to ${userEmail}`);
     }
-      return true;
-    } catch (err) {
+    return true;
+  } catch (err) {
     console.error('Error sending email:', err);
-      return process.env.NODE_ENV !== 'production';
-    }
+    return process.env.NODE_ENV !== 'production';
   }
+}
 
-  io.on('connection', (socket) => {
-    console.log('✅ User connected:', socket.id);
+io.on('connection', (socket) => {
+  console.log('✅ User connected:', socket.id);
 
-    socket.on('create-event', (eventData) => {
+  socket.on('create-event', (eventData) => {
     const event = {
       id: eventData.roomId,
       ...eventData,
       adminId: socket.id,
       createdAt: new Date().toISOString(),
     };
-      events.push(event);
-      events.sort((a, b) => new Date(a.date + ' ' + (a.time || '')) - new Date(b.date + ' ' + (b.time || '')));
-      io.emit('events-updated', events);
-    });
+    events.push(event);
+    events.sort((a, b) => new Date(a.date + ' ' + (a.time || '')) - new Date(b.date + ' ' + (b.time || '')));
+    io.emit('events-updated', events);
+  });
 
-    socket.on('get-events', () => socket.emit('events-updated', events));
+  socket.on('get-events', () => socket.emit('events-updated', events));
 
-    // Admin-only delete event functionality
-    socket.on('delete-event', ({ eventId, adminName, adminEmail }) => {
-      console.log(`🗑️ Delete event request: ${eventId} by ${adminName} (${adminEmail})`);
-      
-      // Find the event to delete
-      const eventIndex = events.findIndex(event => event.id === eventId);
-      
-      if (eventIndex === -1) {
-        console.log(`❌ Event ${eventId} not found`);
-        socket.emit('delete-event-error', { 
-          message: `Event not found. It may have already been deleted.` 
-        });
-        return;
-      }
-      
-      const event = events[eventIndex];
-      
-      // Verify that the requesting user is the admin who created the event
-      if (event.adminName !== adminName || event.adminEmail !== adminEmail) {
-        console.log(`❌ Unauthorized delete attempt: ${adminName} tried to delete event created by ${event.adminName}`);
-        socket.emit('delete-event-error', { 
-          message: `Access denied. Only the event creator (${event.adminName}) can delete this event.` 
-        });
-        return;
-      }
-      
-      // Delete the event
-      const deletedEvent = events.splice(eventIndex, 1)[0];
-      
-      console.log(`✅ Event deleted successfully: ${deletedEvent.title} by ${adminName}`);
-      
-      // Notify the admin who deleted it
-      socket.emit('delete-event-success', {
-        eventId: deletedEvent.id,
-        eventTitle: deletedEvent.title,
-        message: `Event "${deletedEvent.title}" has been successfully deleted.`
-      });
-      
-      // Update all clients with the new events list
-      io.emit('events-updated', events);
-      
-      console.log(`📡 Updated events list broadcasted to all clients`);
-    });
-
-    socket.on('request-email-passcode', async (roomId, userEmail, roomPasscode) => {
-      const room = rooms[roomId];
-      if (!room) return socket.emit('passcode-error', { message: 'Room does not exist!' });
+  socket.on('request-email-passcode', async (roomId, userEmail, roomPasscode) => {
+    const room = rooms[roomId];
+    if (!room) return socket.emit('passcode-error', { message: 'Room does not exist!' });
     if (room.roomPasscode && room.roomPasscode !== roomPasscode) {
       return socket.emit('passcode-error', { message: 'Invalid room passcode.' });
     }
-      const emailLower = (userEmail || '').toLowerCase();
+    const emailLower = (userEmail || '').toLowerCase();
     if (room.joinedEmails.has(emailLower)) {
       return socket.emit('passcode-error', { message: 'This email is already in use.' });
     }
-      const passcode = generatePasscode();
+    const passcode = generatePasscode();
     emailPasscodes[emailLower] = {
       passcode,
       roomId,
       expiresAt: Date.now() + 10 * 60 * 1000,
     };
-      const sent = await sendPasscodeEmail(emailLower, passcode, roomId);
+    const sent = await sendPasscodeEmail(emailLower, passcode, roomId);
     if (sent) {
       socket.emit('passcode-sent', { email: emailLower, passcode });
     } else {
       socket.emit('passcode-error', { message: 'Failed to send email.' });
     }
-    });
+  });
 
-    socket.on('verify-passcode', (roomId, userEmail, passcode) => {
-      const emailLower = (userEmail || '').toLowerCase();
-      const stored = emailPasscodes[emailLower];
+  socket.on('verify-passcode', (roomId, userEmail, passcode) => {
+    const emailLower = (userEmail || '').toLowerCase();
+    const stored = emailPasscodes[emailLower];
     if (!stored || stored.roomId !== roomId) {
       return socket.emit('passcode-verified', { verified: false });
     }
@@ -261,13 +217,13 @@ app.get('/health', (req, res) => {
     if (stored.passcode !== passcode) {
       return socket.emit('passcode-verified', { verified: false, message: 'Invalid passcode.' });
     }
-      delete emailPasscodes[emailLower];
+    delete emailPasscodes[emailLower];
     socket.emit('passcode-verified', { verified: true, roomId });
-    });
+  });
 
-    socket.on('create-room', (roomId, userName, userEmail, isAdmin, roomPasscode) => {
-      socket.join(roomId);
-      if (!rooms[roomId]) {
+  socket.on('create-room', (roomId, userName, userEmail, isAdmin, roomPasscode) => {
+    socket.join(roomId);
+    if (!rooms[roomId]) {
       rooms[roomId] = {
         users: [],
         adminId: socket.id,
@@ -284,39 +240,39 @@ app.get('/health', (req, res) => {
       email: (userEmail || '').toLowerCase(),
       isAdmin: !!isAdmin,
     });
-      rooms[roomId].joinedEmails.add((userEmail || '').toLowerCase());
-      rooms[roomId].adminId = socket.id;
-      socketData[socket.id] = { roomId, userName, userEmail: (userEmail || '').toLowerCase(), isAdmin: !!isAdmin };
-      socket.emit('admin-status', !!isAdmin);
-      io.to(roomId).emit('participant-list', rooms[roomId].users);
-      const otherUsers = rooms[roomId].users.filter((u) => u.id !== socket.id).map((u) => u.id);
-      socket.emit('all-users', otherUsers);
-      socket.to(roomId).emit('user-joined', socket.id);
-      console.log(`👑 Admin ${userName} created room ${roomId}`);
-    });
+    rooms[roomId].joinedEmails.add((userEmail || '').toLowerCase());
+    rooms[roomId].adminId = socket.id;
+    socketData[socket.id] = { roomId, userName, userEmail: (userEmail || '').toLowerCase(), isAdmin: !!isAdmin };
+    socket.emit('admin-status', !!isAdmin);
+    io.to(roomId).emit('participant-list', rooms[roomId].users);
+    const otherUsers = rooms[roomId].users.filter((u) => u.id !== socket.id).map((u) => u.id);
+    socket.emit('all-users', otherUsers);
+    socket.to(roomId).emit('user-joined', socket.id);
+    console.log(`👑 Admin ${userName} created room ${roomId}`);
+  });
 
-    socket.on('join-room', (roomId, userName, userEmail, roomPasscode) => {
-      const room = rooms[roomId];
+  socket.on('join-room', (roomId, userName, userEmail, roomPasscode) => {
+    const room = rooms[roomId];
     if (!room) {
       return socket.emit('email-check', { valid: false, message: 'Room does not exist!' });
     }
     if (room.roomPasscode && room.roomPasscode !== roomPasscode) {
       return socket.emit('email-check', { valid: false, message: 'Invalid room passcode!' });
     }
-      const emailLower = (userEmail || '').toLowerCase();
+    const emailLower = (userEmail || '').toLowerCase();
     if (room.joinedEmails.has(emailLower)) {
       return socket.emit('email-check', { valid: false, message: 'This email is already in use.' });
     }
-      socket.join(roomId);
-      room.users.push({ id: socket.id, name: userName, email: emailLower, isAdmin: false });
-      room.joinedEmails.add(emailLower);
-      socketData[socket.id] = { roomId, userName, userEmail: emailLower, isAdmin: false };
-      socket.emit('email-check', { valid: true, message: 'Joined successfully!' });
-      socket.emit('admin-status', false);
-      io.to(roomId).emit('participant-list', room.users);
-      const otherUsers = room.users.filter((u) => u.id !== socket.id).map((u) => u.id);
-      socket.emit('all-users', otherUsers);
-      socket.to(roomId).emit('user-joined', socket.id);
+    socket.join(roomId);
+    room.users.push({ id: socket.id, name: userName, email: emailLower, isAdmin: false });
+    room.joinedEmails.add(emailLower);
+    socketData[socket.id] = { roomId, userName, userEmail: emailLower, isAdmin: false };
+    socket.emit('email-check', { valid: true, message: 'Joined successfully!' });
+    socket.emit('admin-status', false);
+    io.to(roomId).emit('participant-list', room.users);
+    const otherUsers = room.users.filter((u) => u.id !== socket.id).map((u) => u.id);
+    socket.emit('all-users', otherUsers);
+    socket.to(roomId).emit('user-joined', socket.id);
     const joinMessage = {
       id: `join-${Date.now()}`,
       user: 'System',
@@ -324,46 +280,46 @@ app.get('/health', (req, res) => {
       timestamp: new Date().toLocaleTimeString(),
       type: 'system',
     };
-      io.to(roomId).emit('new-message', joinMessage);
-      if (room.meetingTime) socket.emit('meeting-time-updated', room.meetingTime);
-      if (room.meetingEndTime) socket.emit('meeting-end-time-updated', room.meetingEndTime);
-      console.log(`✅ ${userName} joined room ${roomId}`);
-    });
+    io.to(roomId).emit('new-message', joinMessage);
+    if (room.meetingTime) socket.emit('meeting-time-updated', room.meetingTime);
+    if (room.meetingEndTime) socket.emit('meeting-end-time-updated', room.meetingEndTime);
+    console.log(`✅ ${userName} joined room ${roomId}`);
+  });
 
-    socket.on('set-meeting-time', (roomId, meetingTime) => {
-      const room = rooms[roomId];
-      if (!room || room.adminId !== socket.id) return;
-      room.meetingTime = meetingTime;
-      io.to(roomId).emit('meeting-time-updated', meetingTime);
-    });
+  socket.on('set-meeting-time', (roomId, meetingTime) => {
+    const room = rooms[roomId];
+    if (!room || room.adminId !== socket.id) return;
+    room.meetingTime = meetingTime;
+    io.to(roomId).emit('meeting-time-updated', meetingTime);
+  });
 
-    socket.on('set-meeting-end-time', (roomId, meetingEndTime) => {
-      const room = rooms[roomId];
-      if (!room || room.adminId !== socket.id) return;
-      room.meetingEndTime = meetingEndTime;
-      io.to(roomId).emit('meeting-end-time-updated', meetingEndTime);
-    });
+  socket.on('set-meeting-end-time', (roomId, meetingEndTime) => {
+    const room = rooms[roomId];
+    if (!room || room.adminId !== socket.id) return;
+    room.meetingEndTime = meetingEndTime;
+    io.to(roomId).emit('meeting-end-time-updated', meetingEndTime);
+  });
 
-    socket.on('send-message', (roomId, message) => {
-      const room = rooms[roomId];
-      if (!room) return;
-      room.stats.chatUsers.add(socket.id);
-      io.to(roomId).emit('new-message', message);
-    });
+  socket.on('send-message', (roomId, message) => {
+    const room = rooms[roomId];
+    if (!room) return;
+    room.stats.chatUsers.add(socket.id);
+    io.to(roomId).emit('new-message', message);
+  });
 
-    socket.on('user-speaking', (roomId, isSpeaking) => {
-      const room = rooms[roomId];
-      if (!room) return;
-      if (isSpeaking) room.stats.speechUsers.add(socket.id);
-    });
+  socket.on('user-speaking', (roomId, isSpeaking) => {
+    const room = rooms[roomId];
+    if (!room) return;
+    if (isSpeaking) room.stats.speechUsers.add(socket.id);
+  });
 
-    socket.on('get-meeting-stats', (roomId) => {
-      const room = rooms[roomId];
-      if (!room || room.adminId !== socket.id) return;
-      const stats = {
-        totalParticipants: room.users.length,
-        speechParticipants: room.stats.speechUsers.size,
-        chatParticipants: room.stats.chatUsers.size,
+  socket.on('get-meeting-stats', (roomId) => {
+    const room = rooms[roomId];
+    if (!room || room.adminId !== socket.id) return;
+    const stats = {
+      totalParticipants: room.users.length,
+      speechParticipants: room.stats.speechUsers.size,
+      chatParticipants: room.stats.chatUsers.size,
       speechUsers: Array.from(room.stats.speechUsers).map((id) => {
         const u = room.users.find((x) => x.id === id);
         return u ? u.name : id;
@@ -372,9 +328,9 @@ app.get('/health', (req, res) => {
         const u = room.users.find((x) => x.id === id);
         return u ? u.name : id;
       }),
-      };
-      socket.emit('meeting-stats', stats);
-    });
+    };
+    socket.emit('meeting-stats', stats);
+  });
 
   socket.on('get-participants', (roomId) => {
     const room = rooms[roomId];
@@ -385,57 +341,36 @@ app.get('/health', (req, res) => {
     io.to(to).emit('signal', { from, signal });
   });
 
-  // ENHANCED: Whiteboard handlers with universal visibility
+  // Whiteboard handlers
   socket.on('whiteboard-draw', (roomId, drawData) => {
     const room = rooms[roomId];
     if (!room) return;
     
-    console.log(`🎨 ENHANCED: Whiteboard draw from ${drawData.userName} in room ${roomId}`);
-    
-    // Store drawing data for persistence
+    // Store drawing data
     if (!room.whiteboardData) room.whiteboardData = [];
     room.whiteboardData.push(drawData);
     
-    // Broadcast to ALL participants (including sender for confirmation)
-    io.to(roomId).emit('whiteboard-draw', drawData);
-    
-    console.log(`✅ ENHANCED: Drawing broadcasted to all ${room.users.length} participants`);
+    // Broadcast to all other participants
+    socket.to(roomId).emit('whiteboard-draw', drawData);
   });
 
-  socket.on('whiteboard-clear', (roomId, clearData) => {
+  socket.on('whiteboard-clear', (roomId) => {
     const room = rooms[roomId];
     if (!room) return;
-    
-    console.log(`🗑️ ENHANCED: Whiteboard cleared by ${clearData?.userName || 'Unknown'} in room ${roomId}`);
     
     // Clear stored data
     room.whiteboardData = [];
     
-    // Broadcast clear to ALL participants
-    io.to(roomId).emit('whiteboard-clear', clearData);
-    
-    console.log(`✅ ENHANCED: Clear broadcasted to all ${room.users.length} participants`);
+    // Broadcast clear to all participants
+    io.to(roomId).emit('whiteboard-clear');
   });
 
   socket.on('get-whiteboard', (roomId) => {
     const room = rooms[roomId];
+    if (!room || !room.whiteboardData) return;
     
-    console.log(`📋 ENHANCED: Whiteboard data requested for room ${roomId}`);
-    
-    if (!room) {
-      console.log(`⚠️ Room ${roomId} not found`);
-      return;
-    }
-    
-    if (!room.whiteboardData || room.whiteboardData.length === 0) {
-      console.log(`📋 No existing whiteboard data for room ${roomId}`);
-      socket.emit('whiteboard-data', []);
-      return;
-    }
-    
-    // Send existing whiteboard data to requesting participant
+    // Send existing whiteboard data to new participant
     socket.emit('whiteboard-data', room.whiteboardData);
-    console.log(`✅ ENHANCED: Sent ${room.whiteboardData.length} whiteboard actions to participant`);
   });
 
   // Reactions handler
@@ -541,17 +476,17 @@ app.get('/health', (req, res) => {
     console.log(`✅ Meeting ${roomId} successfully ended by admin ${adminName} - ${reason}`);
   });
 
-    socket.on('leave-room', (roomId) => {
-      socket.leave(roomId);
-      const room = rooms[roomId];
-      if (!room) return;
-      const user = room.users.find((u) => u.id === socket.id);
-      if (!user) return;
-      if (user.isAdmin) {
-        const stats = { 
-          totalParticipants: room.users.length, 
-          speechParticipants: room.stats.speechUsers.size, 
-          chatParticipants: room.stats.chatUsers.size, 
+  socket.on('leave-room', (roomId) => {
+    socket.leave(roomId);
+    const room = rooms[roomId];
+    if (!room) return;
+    const user = room.users.find((u) => u.id === socket.id);
+    if (!user) return;
+    if (user.isAdmin) {
+      const stats = {
+        totalParticipants: room.users.length,
+        speechParticipants: room.stats.speechUsers.size,
+        chatParticipants: room.stats.chatUsers.size,
         speechUsers: Array.from(room.stats.speechUsers).map((id) => {
           const u = room.users.find((x) => x.id === id);
           return u ? u.name : id;
@@ -561,15 +496,15 @@ app.get('/health', (req, res) => {
           return u ? u.name : id;
         }),
       };
-        room.users.forEach((u) => { 
+      room.users.forEach((u) => {
         if (u.id !== socket.id) io.to(u.id).emit('admin-left-meeting', { stats, roomId });
-        });
-        delete rooms[roomId];
-        room.users.forEach((u) => delete socketData[u.id]);
-        return;
-      }
-      room.joinedEmails.delete(user.email.toLowerCase());
-      room.users = room.users.filter((u) => u.id !== socket.id);
+      });
+      delete rooms[roomId];
+      room.users.forEach((u) => delete socketData[u.id]);
+      return;
+    }
+    room.joinedEmails.delete(user.email.toLowerCase());
+    room.users = room.users.filter((u) => u.id !== socket.id);
     const leaveMessage = {
       id: `leave-${Date.now()}`,
       user: 'System',
@@ -577,25 +512,25 @@ app.get('/health', (req, res) => {
       timestamp: new Date().toLocaleTimeString(),
       type: 'system',
     };
-      io.to(roomId).emit('new-message', leaveMessage);
-      socket.to(roomId).emit('user-left', socket.id);
-      io.to(roomId).emit('participant-list', room.users);
-      if (room.users.length === 0) delete rooms[roomId];
-      delete socketData[socket.id];
-    });
+    io.to(roomId).emit('new-message', leaveMessage);
+    socket.to(roomId).emit('user-left', socket.id);
+    io.to(roomId).emit('participant-list', room.users);
+    if (room.users.length === 0) delete rooms[roomId];
+    delete socketData[socket.id];
+  });
 
-    socket.on('disconnect', () => {
-      const data = socketData[socket.id];
-      if (data && data.roomId) {
-        const room = rooms[data.roomId];
-        if (room) {
-          const user = room.users.find((u) => u.id === socket.id);
-          if (user) {
-            if (user.isAdmin) {
-              const stats = { 
-                totalParticipants: room.users.length, 
-                speechParticipants: room.stats.speechUsers.size, 
-                chatParticipants: room.stats.chatUsers.size, 
+  socket.on('disconnect', () => {
+    const data = socketData[socket.id];
+    if (data && data.roomId) {
+      const room = rooms[data.roomId];
+      if (room) {
+        const user = room.users.find((u) => u.id === socket.id);
+        if (user) {
+          if (user.isAdmin) {
+            const stats = {
+              totalParticipants: room.users.length,
+              speechParticipants: room.stats.speechUsers.size,
+              chatParticipants: room.stats.chatUsers.size,
               speechUsers: Array.from(room.stats.speechUsers).map((id) => {
                 const u = room.users.find((x) => x.id === id);
                 return u ? u.name : id;
@@ -605,16 +540,16 @@ app.get('/health', (req, res) => {
                 return u ? u.name : id;
               }),
             };
-              room.users.forEach((u) => { 
+            room.users.forEach((u) => {
               if (u.id !== socket.id) io.to(u.id).emit('admin-left-meeting', { stats, roomId: data.roomId });
-              });
-              delete rooms[data.roomId];
-              room.users.forEach((u) => delete socketData[u.id]);
-              delete socketData[socket.id];
-              return;
-            }
-            room.joinedEmails.delete(user.email.toLowerCase());
-            room.users = room.users.filter((u) => u.id !== socket.id);
+            });
+            delete rooms[data.roomId];
+            room.users.forEach((u) => delete socketData[u.id]);
+            delete socketData[socket.id];
+            return;
+          }
+          room.joinedEmails.delete(user.email.toLowerCase());
+          room.users = room.users.filter((u) => u.id !== socket.id);
           const leaveMessage = {
             id: `leave-${Date.now()}`,
             user: 'System',
@@ -622,22 +557,22 @@ app.get('/health', (req, res) => {
             timestamp: new Date().toLocaleTimeString(),
             type: 'system',
           };
-            io.to(data.roomId).emit('new-message', leaveMessage);
-            socket.to(data.roomId).emit('user-left', socket.id);
-            io.to(data.roomId).emit('participant-list', room.users);
-            if (room.users.length === 0) delete rooms[data.roomId];
-          }
+          io.to(data.roomId).emit('new-message', leaveMessage);
+          socket.to(data.roomId).emit('user-left', socket.id);
+          io.to(data.roomId).emit('participant-list', room.users);
+          if (room.users.length === 0) delete rooms[data.roomId];
         }
       }
-      delete socketData[socket.id];
-    });
+    }
+    delete socketData[socket.id];
   });
+});
 
-  try {
-    startServer();
-  } catch (err) {
-    console.error('Failed to start server:', err);
-    process.exit(1);
-  }
+try {
+  startServer();
+} catch (err) {
+  console.error('Failed to start server:', err);
+  process.exit(1);
+}
 
 module.exports = { app, server, io };
