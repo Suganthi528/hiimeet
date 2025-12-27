@@ -180,6 +180,70 @@ io.on('connection', (socket) => {
 
   socket.on('get-events', () => socket.emit('events-updated', events));
 
+  // Admin function to delete upcoming event
+  socket.on('delete-event', ({ eventId, adminName, adminEmail }) => {
+    console.log(`🗑️ Delete event request: ${eventId} by ${adminName} (${adminEmail})`);
+    
+    // Validate input parameters
+    if (!eventId || !adminName || !adminEmail) {
+      console.log(`❌ Invalid delete request - missing parameters`);
+      socket.emit('delete-event-error', { 
+        message: 'Invalid request. Missing required information.' 
+      });
+      return;
+    }
+    
+    // Find the event to delete
+    const eventIndex = events.findIndex(event => event.id === eventId);
+    
+    if (eventIndex === -1) {
+      console.log(`❌ Event not found: ${eventId}`);
+      socket.emit('delete-event-error', { 
+        message: 'Event not found. It may have already been deleted by another admin.' 
+      });
+      return;
+    }
+    
+    const eventToDelete = events[eventIndex];
+    
+    // Verify that the requesting user is the event creator
+    if (eventToDelete.adminName !== adminName || eventToDelete.adminEmail !== adminEmail) {
+      console.log(`❌ Unauthorized delete attempt for event ${eventId} by ${adminName} (${adminEmail})`);
+      console.log(`   Event creator: ${eventToDelete.adminName} (${eventToDelete.adminEmail})`);
+      socket.emit('delete-event-error', { 
+        message: 'Access denied. Only the event creator can delete this event.' 
+      });
+      return;
+    }
+    
+    // Store event details for logging
+    const deletedEventTitle = eventToDelete.title;
+    const deletedEventDate = eventToDelete.date;
+    const deletedEventTime = eventToDelete.time;
+    
+    // Delete the event permanently from the array
+    events.splice(eventIndex, 1);
+    
+    console.log(`✅ Event permanently deleted: "${deletedEventTitle}" (${eventId})`);
+    console.log(`   Date: ${deletedEventDate}, Time: ${deletedEventTime}`);
+    console.log(`   Deleted by: ${adminName} (${adminEmail})`);
+    console.log(`   Remaining events: ${events.length}`);
+    
+    // Notify all connected clients about the deletion
+    io.emit('event-deleted', eventId);
+    io.emit('events-updated', events);
+    
+    // Send success response to the requesting client
+    socket.emit('delete-event-success', {
+      eventId,
+      eventTitle: deletedEventTitle,
+      message: `Event "${deletedEventTitle}" has been permanently deleted and removed from all users' upcoming events.`
+    });
+    
+    // Log final state
+    console.log(`📊 Event deletion completed. Total events remaining: ${events.length}`);
+  });
+
   socket.on('request-email-passcode', async (roomId, userEmail, roomPasscode) => {
     const room = rooms[roomId];
     if (!room) return socket.emit('passcode-error', { message: 'Room does not exist!' });
